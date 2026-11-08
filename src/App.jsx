@@ -10,6 +10,7 @@ import Kuis from './pages/Kuis.jsx'
 import Tugas from './pages/Tugas.jsx'
 import Presensi from './pages/Presensi.jsx'
 import Nilai from './pages/Nilai.jsx'
+import MataKuliah from './pages/MataKuliah.jsx'
 
 function Lindungi({ children }) {
   const { sesi, profil, memuat, keluar } = useAuth()
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="tugas" element={<Tugas />} />
         <Route path="presensi" element={<Presensi />} />
         <Route path="nilai" element={<Nilai />} />
+        <Route path="matkul" element={<MataKuliah />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

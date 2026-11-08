@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { supabase } from '../supabase.js'
 import { useAuth } from '../auth.jsx'
+import { useKuliah } from '../kuliah.jsx'
 import { useMuat, q, Spinner, Pesan, fmtTgl } from '../ui.jsx'
 
 const hitung = async (tabel, f) => {
@@ -26,19 +27,23 @@ function Kartu({ to, judul, isi, angka }) {
 export default function Beranda() {
   const { profil } = useAuth()
   const dosen = profil.role === 'dosen'
+  const { aktif, memuat: memuatMk } = useKuliah()
   const { data, error, memuat } = useMuat(async () => {
-    const mk = (await q(supabase.from('mata_kuliah').select('*').limit(1)))[0]
+    const mk = aktif
+    if (!mk) return { mk: null, tugas: [], kuis: [] }
+    const cid = mk.course_id
     if (dosen) {
       const [mhs, akun, kirimKuis, kirimTugas] = await Promise.all([
-        hitung('mahasiswa'), hitung('profiles', (r) => r.eq('role', 'mahasiswa')),
-        hitung('quiz_submissions'), hitung('tugas'),
+        hitung('enrollments', (r) => r.eq('course_id', cid)), hitung('profiles', (r) => r.eq('role', 'mahasiswa')),
+        hitung('quiz_submissions', (r) => r.select('npm,pertemuan!inner(course_id)', { count: 'exact', head: true }).eq('pertemuan.course_id', cid)),
+        hitung('tugas', (r) => r.select('npm,daftar_tugas!inner(pertemuan!inner(course_id))', { count: 'exact', head: true }).eq('daftar_tugas.pertemuan.course_id', cid)),
       ])
       return { mk, mhs, akun, kirimKuis, kirimTugas }
     }
-    const tugas = await q(supabase.from('daftar_tugas').select('judul,deadline').eq('status', 'Aktif').order('deadline'))
-    const kuis = await q(supabase.from('pertemuan').select('meeting_id,topik,quiz_ke,quiz_deadline').eq('quiz_open', true).eq('status', 'Aktif'))
+    const tugas = await q(supabase.from('daftar_tugas').select('judul,deadline,pertemuan!inner(course_id)').eq('pertemuan.course_id', cid).eq('status', 'Aktif').order('deadline'))
+    const kuis = await q(supabase.from('pertemuan').select('meeting_id,topik,quiz_ke,quiz_deadline').eq('course_id', cid).eq('quiz_open', true).eq('status', 'Aktif'))
     return { mk, tugas, kuis }
-  }, [])
+  }, [aktif?.course_id])
 
   return (
     <div className="space-y-8">
@@ -50,10 +55,11 @@ export default function Beranda() {
         </div>
       </section>
 
-      {memuat && <Spinner />}
+      {(memuat || memuatMk) && <Spinner />}
+      {!memuatMk && !aktif && <Pesan jenis="info">{dosen ? 'Belum ada mata kuliah. Buat dulu di menu Mata Kuliah.' : 'Anda belum terdaftar di mata kuliah mana pun.'}</Pesan>}
       <Pesan jenis="err">{error}</Pesan>
 
-      {data && dosen && (
+      {data?.mk && dosen && (
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Kartu to="/mahasiswa" judul="Mahasiswa" angka={`${data.akun}/${data.mhs}`} isi="Akun aktif dari seluruh mahasiswa terdaftar." />
           <Kartu to="/kuis" judul="Kuis" angka={data.kirimKuis} isi="Pengiriman kuis. Nilai esai dapat dikoreksi." />
@@ -62,7 +68,7 @@ export default function Beranda() {
         </section>
       )}
 
-      {data && !dosen && (
+      {data?.mk && !dosen && (
         <>
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Kartu to="/materi" judul="Materi" isi="Bahan bacaan dan tautan per pertemuan." />

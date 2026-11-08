@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { supabase } from './supabase.js'
 
 export const fmtTgl = (d, jam = true) =>
   d ? new Date(d).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', ...(jam ? { hour: '2-digit', minute: '2-digit' } : {}) }) : '-'
@@ -96,4 +97,17 @@ export function Bidang({ label, children, bantu }) {
       {bantu && <span className="mt-1 block text-xs text-slate-500">{bantu}</span>}
     </label>
   )
+}
+
+// Sumber gambar soal: data URL, tautan, berkas Google Drive lama ("drive:ID"), atau bucket Storage "soal".
+export function gambarUrl(p) {
+  if (!p) return null
+  if (p.startsWith('data:') || p.startsWith('http')) return p
+  if (p.startsWith('drive:')) return `https://drive.google.com/thumbnail?id=${p.slice(6)}&sz=w1200`
+  return supabase.storage.from('soal').getPublicUrl(p).data.publicUrl
+}
+export function Gambar({ path, className = '' }) {
+  const u = gambarUrl(path)
+  if (!u) return null
+  return <img src={u} alt="Gambar soal" loading="lazy" referrerPolicy="no-referrer" className={`my-3 max-h-80 w-auto max-w-full rounded-xl border object-contain ${className}`} />
 }

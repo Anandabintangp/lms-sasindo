@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../supabase.js'
 import { useAuth } from '../auth.jsx'
+import { useKuliah } from '../kuliah.jsx'
 import { useMuat, q, Judul, Spinner, Pesan, Modal, Bidang, acak } from '../ui.jsx'
 
 async function bukaBerkas(path) {
@@ -47,13 +48,15 @@ function Daftar({ items, dosen, onUbah }) {
 export default function Materi() {
   const { profil } = useAuth()
   const dosen = profil.role === 'dosen'
+  const { aktif } = useKuliah()
   const [form, setForm] = useState(null)
   const [pesan, setPesan] = useState(null)
   const { data, error, memuat, ulang } = useMuat(async () => {
-    const mk = (await q(supabase.from('mata_kuliah').select('course_id').limit(1)))[0]
-    const items = await q(supabase.from('materi').select('*').order('pertemuan_ke').order('created_at'))
+    const mk = aktif
+    if (!mk) return { mk: null, items: [] }
+    const items = await q(supabase.from('materi').select('*').eq('course_id', mk.course_id).order('pertemuan_ke').order('created_at'))
     return { mk, items }
-  }, [])
+  }, [aktif?.course_id])
 
   const ubah = async (aksi, m) => {
     try {

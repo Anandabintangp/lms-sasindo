@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabase.js'
 import { useAuth } from '../auth.jsx'
-import { useMuat, q, Judul, Spinner, Pesan, Modal, Bidang, fmtTgl, angka, keInputTgl, dariInputTgl, acak, ambilSemua } from '../ui.jsx'
+import { useMuat, q, Judul, Spinner, Pesan, Modal, Bidang, fmtTgl, angka, keInputTgl, dariInputTgl, acak, ambilSemua, Gambar } from '../ui.jsx'
+import { useKuliah } from '../kuliah.jsx'
 
 const namaKuis = (p) => (p.quiz_ke ? `Kuis ${p.quiz_ke}` : p.topik || p.meeting_id)
 
@@ -77,6 +78,7 @@ function Kerjakan({ meeting, onSelesai }) {
         {mulai.soal.map((s, i) => (
           <li key={s.question_id} className="card">
             <p className="mb-3 whitespace-pre-wrap font-medium"><span className="mr-2 font-bold text-maroon-700">{i + 1}.</span>{s.pertanyaan} <span className="text-xs text-slate-400">({angka(s.skor_maks)} poin)</span></p>
+            <Gambar path={s.gambar_path} />
             {s.tipe === 'Pilihan Ganda' ? (
               <div className="space-y-2">
                 {['a', 'b', 'c', 'd'].filter((o) => s['opsi_' + o]).map((o) => (
@@ -101,14 +103,16 @@ function Kerjakan({ meeting, onSelesai }) {
 
 function KuisMhs() {
   const { profil } = useAuth()
+  const { aktif: mk } = useKuliah()
   const [aktif, setAktif] = useState(null)
   const [pesan, setPesan] = useState('')
   const { data, error, memuat, ulang } = useMuat(async () => {
-    const kuis = await q(supabase.from('pertemuan').select('*').eq('quiz_open', true).eq('status', 'Aktif').order('quiz_ke'))
+    if (!mk) return { kuis: [], sub: [], ulangi: new Set() }
+    const kuis = await q(supabase.from('pertemuan').select('*').eq('course_id', mk.course_id).eq('quiz_open', true).eq('status', 'Aktif').order('quiz_ke'))
     const sub = await q(supabase.from('quiz_submissions').select('meeting_id,final_score,submitted_at,attempt_no,status').order('attempt_no'))
     const ulangi = await q(supabase.from('quiz_retake_permissions').select('meeting_id').eq('status', 'Allowed'))
     return { kuis, sub, ulangi: new Set(ulangi.map((u) => u.meeting_id)) }
-  }, [])
+  }, [mk?.course_id])
 
   if (aktif) return <Kerjakan meeting={aktif} onSelesai={(t) => { setAktif(null); setPesan(t); ulang() }} />
   return (
@@ -174,6 +178,14 @@ function Soal({ meetingId }) {
   const [pesan, setPesan] = useState('')
   const { data, error, memuat, ulang } = useMuat(() => q(supabase.from('soal_quiz').select('*').eq('meeting_id', meetingId).order('urutan')), [meetingId])
   const set = (k) => (e) => setEdit({ ...edit, [k]: e.target.value })
+  const unggahGambar = async (f) => {
+    if (!f) return
+    if (f.size > 3 * 1024 * 1024) { setPesan('Gambar maksimal 3 MB.'); return }
+    const path = `${meetingId}/${acak(10)}.${(f.name.split('.').pop() || 'jpg').toLowerCase()}`
+    const { error: e1 } = await supabase.storage.from('soal').upload(path, f, { contentType: f.type })
+    if (e1) { setPesan(e1.message); return }
+    setEdit((x) => ({ ...x, gambar_path: path }))
+  }
   const simpan = async (e) => {
     e.preventDefault()
     try {
@@ -194,6 +206,7 @@ function Soal({ meetingId }) {
               <div className="min-w-0">
                 <p className="text-xs text-slate-500">#{s.urutan} · {s.tipe} · {angka(s.skor_maks)} poin{s.status !== 'Aktif' && ' · nonaktif'}</p>
                 <p className="mt-1 whitespace-pre-wrap text-sm font-medium">{s.pertanyaan}</p>
+                <Gambar path={s.gambar_path} className="max-h-40" />
                 {s.tipe === 'Pilihan Ganda'
                   ? <p className="mt-1 text-xs text-slate-600">Kunci: <b>{s.jawaban_benar}</b></p>
                   : <p className="mt-1 text-xs text-slate-600">Kata kunci: {s.kata_kunci_esai || '—'}</p>}
@@ -212,6 +225,11 @@ function Soal({ meetingId }) {
               <Bidang label="Urutan"><input type="number" className="input" value={edit.urutan || ''} onChange={set('urutan')} /></Bidang>
             </div>
             <Bidang label="Pertanyaan"><textarea required rows={4} className="input" value={edit.pertanyaan} onChange={set('pertanyaan')} /></Bidang>
+            <Bidang label="Gambar (opsional)" bantu="JPG/PNG/WebP, maksimal 3 MB.">
+              <Gambar path={edit.gambar_path} className="max-h-40" />
+              <input type="file" accept="image/*" onChange={(e) => unggahGambar(e.target.files[0])} />
+              {edit.gambar_path && <button type="button" className="btn-ghost mt-2" onClick={() => setEdit({ ...edit, gambar_path: null })}>Hapus gambar</button>}
+            </Bidang>
             {edit.tipe === 'Pilihan Ganda' ? (
               <>
                 {['a', 'b', 'c', 'd'].map((o) => <Bidang key={o} label={`Opsi ${o.toUpperCase()}`}><input className="input" value={edit['opsi_' + o] || ''} onChange={set('opsi_' + o)} /></Bidang>)}
@@ -273,7 +291,7 @@ function Jawaban({ sub, onTutup }) {
   const [pesan, setPesan] = useState('')
   const { data, error, memuat, ulang } = useMuat(async () => {
     const r = await q(supabase.from('respon_quiz').select('*').eq('submission_id', sub.submission_id))
-    const s = await q(supabase.from('soal_quiz').select('question_id,urutan,pertanyaan,jawaban_benar,kata_kunci_esai,skor_maks').eq('meeting_id', sub.meeting_id))
+    const s = await q(supabase.from('soal_quiz').select('question_id,urutan,pertanyaan,gambar_path,jawaban_benar,kata_kunci_esai,skor_maks').eq('meeting_id', sub.meeting_id))
     const peta = Object.fromEntries(s.map((x) => [x.question_id, x]))
     return r.map((x) => ({ ...x, soal: peta[x.question_id] || {} })).sort((a, b) => (a.soal.urutan || 0) - (b.soal.urutan || 0))
   }, [sub.submission_id])
@@ -292,6 +310,7 @@ function Jawaban({ sub, onTutup }) {
         {data?.map((r) => (
           <li key={r.response_id} className="rounded-xl border p-4">
             <p className="whitespace-pre-wrap text-sm font-medium">{r.soal.urutan}. {r.soal.pertanyaan}</p>
+            <Gambar path={r.soal.gambar_path} className="max-h-40" />
             <p className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm">{r.jawaban || <i className="text-slate-400">(kosong)</i>}</p>
             {r.tipe_soal === 'Pilihan Ganda'
               ? <p className="mt-2 text-xs">Kunci: <b>{r.soal.jawaban_benar}</b> · {r.is_correct ? <span className="text-emerald-700">benar</span> : <span className="text-red-700">salah</span>} · skor {angka(r.final_score)}</p>
@@ -312,7 +331,7 @@ function Jawaban({ sub, onTutup }) {
 
 function Distribusi({ p }) {
   const { data, error, memuat } = useMuat(async () => {
-    const soal = await q(supabase.from('soal_quiz').select('question_id,urutan,pertanyaan,tipe,jawaban_benar,opsi_a,opsi_b,opsi_c,opsi_d').eq('meeting_id', p.meeting_id).order('urutan'))
+    const soal = await q(supabase.from('soal_quiz').select('question_id,urutan,pertanyaan,gambar_path,tipe,jawaban_benar,opsi_a,opsi_b,opsi_c,opsi_d').eq('meeting_id', p.meeting_id).order('urutan'))
     const resp = await ambilSemua((a, b) => supabase.from('respon_quiz').select('question_id,jawaban,is_correct').eq('meeting_id', p.meeting_id).range(a, b))
     return { soal, resp }
   }, [p.meeting_id])
@@ -326,6 +345,7 @@ function Distribusi({ p }) {
         return (
           <li key={s.question_id} className="card">
             <p className="mb-2 text-sm font-medium">{s.urutan}. {s.pertanyaan}</p>
+            <Gambar path={s.gambar_path} className="max-h-40" />
             {['A', 'B', 'C', 'D'].filter((o) => s['opsi_' + o.toLowerCase()]).map((o) => {
               const c = r.filter((x) => (x.jawaban || '').toUpperCase() === o).length
               return (
@@ -344,19 +364,36 @@ function Distribusi({ p }) {
 }
 
 function KuisDosen() {
+  const { aktif: mk } = useKuliah()
   const [pilih, setPilih] = useState(null)
   const [tabAktif, setTabAktif] = useState('hasil')
   const { data, error, memuat, ulang } = useMuat(async () => {
-    const per = await q(supabase.from('pertemuan').select('*').order('quiz_ke', { nullsFirst: false }).order('pertemuan_ke'))
-    const soal = await ambilSemua((a, b) => supabase.from('soal_quiz').select('meeting_id').range(a, b))
+    if (!mk) return []
+    const per = await q(supabase.from('pertemuan').select('*').eq('course_id', mk.course_id).neq('status', 'Dihapus').order('quiz_ke', { nullsFirst: false }).order('pertemuan_ke'))
+    const soal = await ambilSemua((a, b) => supabase.from('soal_quiz').select('meeting_id,pertemuan!inner(course_id)').eq('pertemuan.course_id', mk.course_id).range(a, b))
     const ada = new Set(soal.map((s) => s.meeting_id))
     return per.filter((p) => p.quiz_ke || ada.has(p.meeting_id))
-  }, [])
+  }, [mk?.course_id])
+  const [baruKuis, setBaruKuis] = useState('')
+  const buatKuis = async () => {
+    try {
+      const ke = Math.max(0, ...(data || []).map((x) => x.quiz_ke || 0)) + 1
+      const id = 'MTG-' + acak(8)
+      await q(supabase.from('pertemuan').insert({ meeting_id: id, course_id: mk.course_id, class_id: 'ALL', pertemuan_ke: ke, topik: baruKuis || `Kuis ${ke}`, quiz_ke: ke, quiz_open: false, status: 'Aktif', assessment_type: 'Kuis' }))
+      setBaruKuis(''); await ulang(); setPilih(id); setTabAktif('soal')
+    } catch (e) { alert(e.message) }
+  }
   const p = data?.find((x) => x.meeting_id === pilih)
   return (
     <div>
       <Judul judul="Kuis" sub="Buka/tutup kuis, kelola soal, lihat hasil dan koreksi esai." />
       {memuat && <Spinner />}<Pesan jenis="err">{error}</Pesan>
+      {mk && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <input className="input max-w-xs" placeholder="Topik kuis baru (opsional)" value={baruKuis} onChange={(e) => setBaruKuis(e.target.value)} />
+          <button className="btn" onClick={buatKuis}>+ Kuis baru</button>
+        </div>
+      )}
       <div className="mb-5 flex flex-wrap gap-2">
         {data?.map((x) => (
           <button key={x.meeting_id} onClick={() => setPilih(x.meeting_id)}

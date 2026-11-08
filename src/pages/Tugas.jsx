@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../supabase.js'
 import { useAuth } from '../auth.jsx'
+import { useKuliah } from '../kuliah.jsx'
 import { useMuat, q, Judul, Spinner, Pesan, Modal, Bidang, fmtTgl, angka, keInputTgl, dariInputTgl, acak, ambilSemua } from '../ui.jsx'
 
 async function bukaTugas(t) {
@@ -13,14 +14,16 @@ async function bukaTugas(t) {
 /* ───────────── MAHASISWA ───────────── */
 function TugasMhs() {
   const { profil } = useAuth()
+  const { aktif } = useKuliah()
   const [sibuk, setSibuk] = useState(null)
   const [pesan, setPesan] = useState(null)
   const [berkas, setBerkas] = useState({})
   const { data, error, memuat, ulang } = useMuat(async () => {
-    const daftar = await q(supabase.from('daftar_tugas').select('*').eq('status', 'Aktif').order('tugas_ke'))
+    if (!aktif) return { daftar: [], kirim: [] }
+    const daftar = await q(supabase.from('daftar_tugas').select('*, pertemuan!inner(course_id)').eq('pertemuan.course_id', aktif.course_id).eq('status', 'Aktif').order('tugas_ke'))
     const kirim = await q(supabase.from('tugas').select('*').order('submitted_at', { ascending: false }))
     return { daftar, kirim }
-  }, [])
+  }, [aktif?.course_id])
 
   const unggah = async (d) => {
     const f = berkas[d.assignment_id]
@@ -127,14 +130,16 @@ function FormTugas({ awal, mk, onSelesai }) {
 }
 
 function Penilaian({ d }) {
+  const { aktif } = useKuliah()
   const [semua, setSemua] = useState(false)
   const [edit, setEdit] = useState({})
   const [pesan, setPesan] = useState('')
   const { data, error, memuat, ulang } = useMuat(async () => {
     const kirim = await ambilSemua((a, b) => supabase.from('tugas').select('*, mahasiswa(nama,kelas)').eq('assignment_id', d.assignment_id).order('submitted_at', { ascending: false }).range(a, b))
-    const mhs = await q(supabase.from('mahasiswa').select('npm,nama,kelas').order('npm').range(0, 999))
+    const enr = await ambilSemua((a, b) => supabase.from('enrollments').select('npm,mahasiswa(nama,kelas)').eq('course_id', aktif.course_id).order('npm').range(a, b))
+    const mhs = enr.map((e) => ({ npm: e.npm, nama: e.mahasiswa?.nama, kelas: e.mahasiswa?.kelas }))
     return { kirim, mhs }
-  }, [d.assignment_id])
+  }, [d.assignment_id, aktif?.course_id])
 
   const simpan = async (t) => {
     try {
@@ -189,13 +194,15 @@ function Penilaian({ d }) {
 }
 
 function TugasDosen() {
+  const { aktif } = useKuliah()
   const [pilih, setPilih] = useState(null)
   const [form, setForm] = useState(null)
   const { data, error, memuat, ulang } = useMuat(async () => {
-    const mk = (await q(supabase.from('mata_kuliah').select('course_id').limit(1)))[0]
-    const daftar = await q(supabase.from('daftar_tugas').select('*').order('tugas_ke'))
+    const mk = aktif
+    if (!mk) return { mk: null, daftar: [] }
+    const daftar = await q(supabase.from('daftar_tugas').select('*, pertemuan!inner(course_id)').eq('pertemuan.course_id', mk.course_id).order('tugas_ke'))
     return { mk, daftar }
-  }, [])
+  }, [aktif?.course_id])
   const d = data?.daftar.find((x) => x.assignment_id === pilih)
   return (
     <div>

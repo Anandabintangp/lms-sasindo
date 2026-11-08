@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { NavLink, Outlet, Link } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
+import { useKuliah } from '../kuliah.jsx'
 
 const MENU_DOSEN = [
   ['/', 'Beranda'], ['/mahasiswa', 'Mahasiswa'], ['/materi', 'Materi'], ['/kuis', 'Kuis'],
-  ['/tugas', 'Tugas'], ['/presensi', 'Presensi'], ['/nilai', 'Nilai'],
+  ['/tugas', 'Tugas'], ['/presensi', 'Presensi'], ['/nilai', 'Nilai'], ['/matkul', 'Mata Kuliah'],
 ]
 const MENU_MHS = [
   ['/', 'Beranda'], ['/materi', 'Materi'], ['/kuis', 'Kuis'], ['/tugas', 'Tugas'], ['/presensi', 'Presensi'], ['/nilai', 'Nilai'],
@@ -13,6 +14,7 @@ const MENU_MHS = [
 export function Navbar() {
   const { profil, keluar } = useAuth()
   const [buka, setBuka] = useState(false)
+  const { daftar, aktif, pilih } = useKuliah()
   const menu = profil?.role === 'dosen' ? MENU_DOSEN : MENU_MHS
   const kelas = ({ isActive }) =>
     `block border-b-4 px-3 py-3 text-sm font-semibold transition ${isActive ? 'border-gold-400 text-maroon-800' : 'border-transparent text-slate-600 hover:text-maroon-700'}`
@@ -32,6 +34,11 @@ export function Navbar() {
             <span className="block text-xs text-slate-500">{profil?.role === 'dosen' ? 'Ruang Dosen' : 'Ruang Mahasiswa'}</span>
           </span>
         </Link>
+        {daftar.length > 0 && (
+          <select aria-label="Mata kuliah aktif" className="input mx-2 max-w-[14rem] truncate py-1.5 text-xs" value={aktif?.course_id || ''} onChange={(e) => pilih(e.target.value)}>
+            {daftar.map((m) => <option key={m.course_id} value={m.course_id}>{m.nama}{m.tahun_akademik ? ` · ${m.tahun_akademik}` : ''}</option>)}
+          </select>
+        )}
         <button className="rounded-lg border px-3 py-1.5 text-sm md:hidden" onClick={() => setBuka(!buka)}>Menu</button>
         <nav className="hidden items-center md:flex">
           {menu.map(([to, t]) => <NavLink key={to} to={to} end={to === '/'} className={kelas}>{t}</NavLink>)}

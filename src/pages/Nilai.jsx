@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../supabase.js'
 import { useAuth } from '../auth.jsx'
+import { useKuliah } from '../kuliah.jsx'
 import { useMuat, q, Judul, Spinner, Pesan, angka, unduhCSV, ambilSemua } from '../ui.jsx'
 
 const labelKuis = (p) => (p.quiz_ke ? `Kuis ${p.quiz_ke}` : p.topik || p.meeting_id)
@@ -28,16 +29,20 @@ function susun({ per, subs, daftar, tugas, nilai, mhs }) {
 
 function NilaiMhs() {
   const { profil } = useAuth()
+  const { aktif } = useKuliah()
   const { data, error, memuat } = useMuat(async () => {
-    const [per, subs, daftar, tugas, nilai] = await Promise.all([
-      q(supabase.from('pertemuan').select('meeting_id,quiz_ke,topik').not('quiz_ke', 'is', null).order('quiz_ke')),
+    if (!aktif) return null
+    const cid = aktif.course_id
+    const [per, subs0, daftar0, tugas0, nilai] = await Promise.all([
+      q(supabase.from('pertemuan').select('meeting_id,quiz_ke,topik').eq('course_id', cid).neq('status', 'Dihapus').not('quiz_ke', 'is', null).order('quiz_ke')),
       q(supabase.from('quiz_submissions').select('meeting_id,npm,final_score,attempt_no')),
-      q(supabase.from('daftar_tugas').select('assignment_id,judul,tugas_ke').order('tugas_ke')),
+      q(supabase.from('daftar_tugas').select('assignment_id,judul,tugas_ke,pertemuan!inner(course_id)').eq('pertemuan.course_id', cid).order('tugas_ke')),
       q(supabase.from('tugas').select('assignment_id,npm,final_score,submitted_at')),
-      q(supabase.from('nilai').select('komponen,npm,nilai,catatan')),
+      q(supabase.from('nilai').select('komponen,npm,nilai,catatan').eq('course_id', cid)),
     ])
-    return susun({ per, subs, daftar, tugas, nilai, mhs: [{ npm: profil.npm }] })
-  }, [])
+    const idq = new Set(per.map((p) => p.meeting_id)); const idt = new Set(daftar0.map((d) => d.assignment_id))
+    return susun({ per, subs: subs0.filter((s) => idq.has(s.meeting_id)), daftar: daftar0, tugas: tugas0.filter((t) => idt.has(t.assignment_id)), nilai, mhs: [{ npm: profil.npm }] })
+  }, [aktif?.course_id])
   const baris = data?.baris[0]
   const kolom = data ? [...data.kolKuis, ...data.kolTugas, ...data.komp.map((k) => ({ k: 'n:' + k, label: k }))] : []
   return (
@@ -59,19 +64,24 @@ function NilaiMhs() {
 }
 
 function NilaiDosen() {
+  const { aktif } = useKuliah()
   const [baru, setBaru] = useState('')
   const [pesan, setPesan] = useState('')
   const [kelas, setKelas] = useState('')
   const { data, error, memuat, ulang } = useMuat(async () => {
-    const mk = (await q(supabase.from('mata_kuliah').select('course_id').limit(1)))[0]
-    const mhs = await q(supabase.from('mahasiswa').select('npm,nama,kelas').order('npm').range(0, 999))
-    const per = await q(supabase.from('pertemuan').select('meeting_id,quiz_ke,topik').not('quiz_ke', 'is', null).order('quiz_ke'))
-    const subs = await ambilSemua((a, b) => supabase.from('quiz_submissions').select('meeting_id,npm,final_score,attempt_no').range(a, b))
-    const daftar = await q(supabase.from('daftar_tugas').select('assignment_id,judul,tugas_ke').order('tugas_ke'))
-    const tugas = await ambilSemua((a, b) => supabase.from('tugas').select('assignment_id,npm,final_score,submitted_at').range(a, b))
-    const nilai = await ambilSemua((a, b) => supabase.from('nilai').select('*').range(a, b))
+    const mk = aktif
+    if (!mk) return null
+    const cid = mk.course_id
+    const enr = await ambilSemua((a, b) => supabase.from('enrollments').select('npm,mahasiswa(nama,kelas)').eq('course_id', cid).order('npm').range(a, b))
+    const mhs = enr.map((e) => ({ npm: e.npm, nama: e.mahasiswa?.nama, kelas: e.mahasiswa?.kelas }))
+    const per = await q(supabase.from('pertemuan').select('meeting_id,quiz_ke,topik').eq('course_id', cid).neq('status', 'Dihapus').not('quiz_ke', 'is', null).order('quiz_ke'))
+    const daftar = await q(supabase.from('daftar_tugas').select('assignment_id,judul,tugas_ke,pertemuan!inner(course_id)').eq('pertemuan.course_id', cid).order('tugas_ke'))
+    const idq = per.map((p) => p.meeting_id); const idt = daftar.map((d) => d.assignment_id)
+    const subs = idq.length ? await ambilSemua((a, b) => supabase.from('quiz_submissions').select('meeting_id,npm,final_score,attempt_no').in('meeting_id', idq).range(a, b)) : []
+    const tugas = idt.length ? await ambilSemua((a, b) => supabase.from('tugas').select('assignment_id,npm,final_score,submitted_at').in('assignment_id', idt).range(a, b)) : []
+    const nilai = await ambilSemua((a, b) => supabase.from('nilai').select('*').eq('course_id', cid).range(a, b))
     return { mk, nilai, ...susun({ per, subs, daftar, tugas, nilai, mhs }) }
-  }, [])
+  }, [aktif?.course_id])
 
   const simpan = async (npm, komponen, v) => {
     try {
@@ -93,6 +103,7 @@ function NilaiDosen() {
 
   if (memuat) return <Spinner />
   if (error) return <Pesan jenis="err">{error}</Pesan>
+  if (!data) return <Pesan>Pilih mata kuliah.</Pesan>
   const semuaKomp = [...data.komp, ...lokal.filter((k) => !data.komp.includes(k))]
   const baris = data.baris.filter((b) => !kelas || b.kelas === kelas)
   const kol = [...data.kolKuis, ...data.kolTugas]

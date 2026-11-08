@@ -1,17 +1,19 @@
 import { useState } from 'react'
 import { supabase } from '../supabase.js'
 import { useAuth } from '../auth.jsx'
+import { useKuliah } from '../kuliah.jsx'
 import { useMuat, q, Judul, Spinner, Pesan, fmtTgl, ambilSemua, unduhCSV } from '../ui.jsx'
 
 const STATUS = ['Hadir', 'Izin', 'Sakit', 'Alpa']
 
 /* ───────────── MAHASISWA ───────────── */
 function PresensiMhs() {
+  const { aktif } = useKuliah()
   const [kode, setKode] = useState('')
   const [pesan, setPesan] = useState(null)
   const [sibuk, setSibuk] = useState(false)
   const { data, error, memuat, ulang } = useMuat(() =>
-    q(supabase.from('presensi').select('*, sesi_presensi(pertemuan_ke,tanggal)').order('dicatat_at', { ascending: false })), [])
+    aktif ? q(supabase.from('presensi').select('*, sesi_presensi!inner(pertemuan_ke,tanggal,course_id)').eq('sesi_presensi.course_id', aktif.course_id).order('dicatat_at', { ascending: false })) : [], [aktif?.course_id])
   const kirim = async (e) => {
     e.preventDefault(); setSibuk(true); setPesan(null)
     try {
@@ -53,6 +55,7 @@ function PresensiMhs() {
 
 /* ───────────── DOSEN ───────────── */
 function PresensiDosen() {
+  const { aktif } = useKuliah()
   const [kelas, setKelas] = useState('')
   const [ke, setKe] = useState(1)
   const [menit, setMenit] = useState(30)
@@ -60,14 +63,14 @@ function PresensiDosen() {
   const [tab, setTab] = useState('sesi')
 
   const dasar = useMuat(async () => {
-    const kls = await q(supabase.from('kelas').select('class_id,nama_kelas,course_id').order('class_id'))
-    return kls
-  }, [])
-  const kid = kelas || dasar.data?.[0]?.class_id
+    if (!aktif) return []
+    return q(supabase.from('kelas').select('class_id,nama_kelas,course_id').eq('course_id', aktif.course_id).order('nama_kelas'))
+  }, [aktif?.course_id])
+  const kid = dasar.data?.find((k) => k.class_id === kelas)?.class_id || dasar.data?.[0]?.class_id
 
   const { data, error, memuat, ulang } = useMuat(async () => {
     if (!kid) return null
-    const mhs = await q(supabase.from('enrollments').select('npm, mahasiswa(nama)').eq('class_id', kid).eq('status', 'Aktif').order('npm').range(0, 999))
+    const mhs = await ambilSemua((a, b) => supabase.from('enrollments').select('npm, mahasiswa(nama)').eq('class_id', kid).eq('status', 'Aktif').order('npm').range(a, b))
     const sesi = await q(supabase.from('sesi_presensi').select('*').eq('class_id', kid).order('pertemuan_ke'))
     const kodeRows = sesi.length ? await q(supabase.from('sesi_kode').select('*').in('sesi_id', sesi.map((s) => s.id))) : []
     const ids = sesi.map((s) => s.id)
